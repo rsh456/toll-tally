@@ -49,7 +49,7 @@ func (dr *DataReceiver) wsReceiveLoop() {
 			log.Println("read errpr:", err)
 			continue
 		}
-		fmt.Printf("received OBU data from [%d] :: <lat %.2f> \n", data.OBUID, data.Lat, data.Long)
+		fmt.Printf("received OBU data from [%d] :: <lat %.2f, long %.2f> \n", data.OBUID, data.Lat, data.Long)
 		dr.msgchn <- data
 	}
 }
