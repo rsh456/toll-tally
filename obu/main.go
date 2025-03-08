@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/rsh456/toll-calculator/types"
+	"github.com/rsh456/toll-tally/types"
 )
 
 var sendInterval = time.Second
