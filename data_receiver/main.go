@@ -5,48 +5,16 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
 	"github.com/gorilla/websocket"
 	"github.com/rsh456/toll-tally/types"
 )
 
-const kafkaTopic = "obu-data"
-
 func main() {
-	p, err := kafka.NewProducer(&kafka.ConfigMap{"bootstrap.servers": "localhost"})
+	recv, err := NewDataReceiver()
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 
-	defer p.Close()
-
-	// Delivery report handler for produced messages
-	go func() {
-		for e := range p.Events() {
-			switch ev := e.(type) {
-			case *kafka.Message:
-				if ev.TopicPartition.Error != nil {
-					fmt.Printf("Delivery failed: %v\n", ev.TopicPartition)
-				} else {
-					fmt.Printf("Delivered message to %v\n", ev.TopicPartition)
-				}
-			}
-		}
-	}()
-
-	// Produce messages to topic (asynchronously)
-	topic := kafkaTopic
-	for i := 0; i < 5; i++ {
-		p.Produce(&kafka.Message{
-			TopicPartition: kafka.TopicPartition{Topic: &topic, Partition: kafka.PartitionAny},
-			Value:          []byte("test"),
-		}, nil)
-	}
-	return
-	// Wait for message deliveries before shutting down
-	//p.Flush(15 * 1000)
-
-	recv := NewDataReceiver()
 	http.HandleFunc("/ws", recv.handleWS)
 	http.ListenAndServe(":30000", nil)
 
@@ -55,12 +23,29 @@ func main() {
 type DataReceiver struct {
 	msgchn chan types.OBUData
 	conn   *websocket.Conn
+	prod   DataProducer
 }
 
-func NewDataReceiver() *DataReceiver {
+func NewDataReceiver() (*DataReceiver, error) {
+	var (
+		p          DataProducer
+		err        error
+		kafkaTopic = "obudata"
+	)
+
+	p, err = NewKafkaProducer(kafkaTopic)
+	if err != nil {
+		return nil, err
+	}
+	p = NewLogMiddleware(p)
 	return &DataReceiver{
 		msgchn: make(chan types.OBUData, 128),
-	}
+		prod:   p,
+	}, nil
+}
+
+func (dr *DataReceiver) produceData(data types.OBUData) error {
+	return dr.prod.ProduceData(data)
 }
 
 func (dr *DataReceiver) handleWS(w http.ResponseWriter, r *http.Request) {
@@ -85,7 +70,9 @@ func (dr *DataReceiver) wsReceiveLoop() {
 			log.Println("read errpr:", err)
 			continue
 		}
-		fmt.Printf("received OBU data from [%d] :: <lat %.2f, long %.2f> \n", data.OBUID, data.Lat, data.Long)
-		dr.msgchn <- data
+		fmt.Println("received message", data)
+		if err := dr.produceData(data); err != nil {
+			fmt.Println("kafka produce error:", err)
+		}
 	}
 }
